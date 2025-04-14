@@ -1,0 +1,63 @@
+spring:
+  application:
+    name: novalux-adaptive-core
+
+server:
+  port: 8080
+  shutdown: graceful
+
+management:
+  server:
+    port: 9090
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+telemetry:
+  enabled: true
+  sampling-rate: 0.1
+  trace-export-interval: 5s
+
+feedback-loop:
+  enabled: true
+  update-interval: 60s
+  optimization-threshold: 0.05
+  max-concurrent-optimizations: 5
+
+ai-integration:
+  model-server-url: "http://ai-model-server.novalux-ai.svc.cluster.local:8000"
+  inference-timeout: 500ms
+  batch-size: 32
+  cache-ttl: 300s
+
+data-pipeline:
+  kafka:
+    bootstrap-servers: "kafka-headless.novalux-data.svc.cluster.local:9092"
+    consumer-group: "adaptive-core"
+    topics:
+      input:
+        - "player-actions"
+        - "game-events"
+        - "system-metrics"
+      output:
+        optimization-events: "optimization-events"
+        parameter-adjustments: "parameter-adjustments"
+    auto-offset-reset: "latest"
+    max-poll-records: 500
+    poll-timeout: 5s
+  
+  elasticsearch:
+    hosts: "elasticsearch-master.novalux-data.svc.cluster.local:9200"
+    index-prefix: "novalux-"
+    bulk-actions: 1000
+    bulk-size: 5MB
+    flush-interval: 5s
+    concurrency: 5

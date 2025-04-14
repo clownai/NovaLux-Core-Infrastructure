@@ -1,0 +1,184 @@
+spring:
+  application:
+    name: novalux-core-integrator
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+      routes:
+        - id: adaptive-core-route
+          uri: lb://novalux-adaptive-core
+          predicates:
+            - Path=/api/adaptive-core/**
+          filters:
+            - StripPrefix=2
+            - name: CircuitBreaker
+              args:
+                name: adaptiveCoreCircuitBreaker
+                fallbackUri: forward:/fallback/adaptive-core
+        - id: feedback-loop-route
+          uri: lb://novalux-feedback-loop-manager
+          predicates:
+            - Path=/api/feedback-loop/**
+          filters:
+            - StripPrefix=2
+            - name: CircuitBreaker
+              args:
+                name: feedbackLoopCircuitBreaker
+                fallbackUri: forward:/fallback/feedback-loop
+        - id: game-service-route
+          uri: lb://novalux-game-service
+          predicates:
+            - Path=/api/games/**
+          filters:
+            - StripPrefix=2
+            - name: CircuitBreaker
+              args:
+                name: gameServiceCircuitBreaker
+                fallbackUri: forward:/fallback/game-service
+        - id: player-service-route
+          uri: lb://novalux-player-service
+          predicates:
+            - Path=/api/players/**
+          filters:
+            - StripPrefix=2
+            - name: CircuitBreaker
+              args:
+                name: playerServiceCircuitBreaker
+                fallbackUri: forward:/fallback/player-service
+        - id: analytics-service-route
+          uri: lb://novalux-analytics-service
+          predicates:
+            - Path=/api/analytics/**
+          filters:
+            - StripPrefix=2
+            - name: CircuitBreaker
+              args:
+                name: analyticsServiceCircuitBreaker
+                fallbackUri: forward:/fallback/analytics-service
+
+server:
+  port: 8080
+  shutdown: graceful
+
+management:
+  server:
+    port: 9090
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics,gateway
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eureka-server.novalux-system.svc.cluster.local:8761/eureka/
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+    hostname: ${spring.application.name}
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      adaptiveCoreCircuitBreaker:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        waitDurationInOpenState: 5s
+        failureRateThreshold: 50
+        eventConsumerBufferSize: 10
+      feedbackLoopCircuitBreaker:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        waitDurationInOpenState: 5s
+        failureRateThreshold: 50
+        eventConsumerBufferSize: 10
+      gameServiceCircuitBreaker:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        waitDurationInOpenState: 5s
+        failureRateThreshold: 50
+        eventConsumerBufferSize: 10
+      playerServiceCircuitBreaker:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        waitDurationInOpenState: 5s
+        failureRateThreshold: 50
+        eventConsumerBufferSize: 10
+      analyticsServiceCircuitBreaker:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        waitDurationInOpenState: 5s
+        failureRateThreshold: 50
+        eventConsumerBufferSize: 10
+
+  timelimiter:
+    instances:
+      adaptiveCoreCircuitBreaker:
+        timeoutDuration: 5s
+      feedbackLoopCircuitBreaker:
+        timeoutDuration: 5s
+      gameServiceCircuitBreaker:
+        timeoutDuration: 5s
+      playerServiceCircuitBreaker:
+        timeoutDuration: 5s
+      analyticsServiceCircuitBreaker:
+        timeoutDuration: 5s
+
+telemetry:
+  enabled: true
+  sampling-rate: 0.1
+  trace-export-interval: 5s
+
+service-discovery:
+  enabled: true
+  refresh-interval: 30s
+  health-check-interval: 15s
+
+api-gateway:
+  rate-limit:
+    enabled: true
+    default-limit: 100
+    default-refresh-period: 60s
+  cors:
+    allowed-origins: "*"
+    allowed-methods: "GET,POST,PUT,DELETE,OPTIONS"
+    allowed-headers: "*"
+    max-age: 3600
+
+data-pipeline:
+  kafka:
+    bootstrap-servers: "kafka-headless.novalux-data.svc.cluster.local:9092"
+    consumer-group: "core-integrator"
+    topics:
+      system-events: "system-events"
+      service-registry: "service-registry"
+      health-metrics: "health-metrics"
+    auto-offset-reset: "latest"
+    max-poll-records: 500
+    poll-timeout: 5s

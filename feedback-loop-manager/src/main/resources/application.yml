@@ -1,0 +1,90 @@
+spring:
+  application:
+    name: novalux-feedback-loop-manager
+
+server:
+  port: 8080
+  shutdown: graceful
+
+management:
+  server:
+    port: 9090
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+telemetry:
+  enabled: true
+  sampling-rate: 0.1
+  trace-export-interval: 5s
+
+player-behavior:
+  analysis:
+    enabled: true
+    update-interval: 300s
+    min-data-points: 100
+    confidence-threshold: 0.7
+    max-concurrent-analyses: 10
+
+game-balance:
+  optimization:
+    enabled: true
+    update-interval: 600s
+    min-player-count: 50
+    adjustment-threshold: 0.05
+    max-adjustment-percentage: 0.2
+
+content-recommendation:
+  enabled: true
+  update-interval: 900s
+  novelty-weight: 0.3
+  personalization-weight: 0.7
+  max-recommendations: 20
+
+responsible-gaming:
+  monitoring:
+    enabled: true
+    update-interval: 300s
+    risk-threshold: 0.8
+    intervention-cooldown: 86400s
+
+data-pipeline:
+  kafka:
+    bootstrap-servers: "kafka-headless.novalux-data.svc.cluster.local:9092"
+    consumer-group: "feedback-loop-manager"
+    topics:
+      input:
+        - "player-actions"
+        - "game-events"
+        - "system-metrics"
+        - "optimization-events"
+        - "parameter-adjustments"
+      output:
+        player-insights: "player-insights"
+        balance-adjustments: "balance-adjustments"
+        content-recommendations: "content-recommendations"
+        responsible-gaming-alerts: "responsible-gaming-alerts"
+    auto-offset-reset: "latest"
+    max-poll-records: 500
+    poll-timeout: 5s
+  
+  elasticsearch:
+    hosts: "elasticsearch-master.novalux-data.svc.cluster.local:9200"
+    index-prefix: "novalux-"
+    bulk-actions: 1000
+    bulk-size: 5MB
+    flush-interval: 5s
+    concurrency: 5
+
+adaptive-core:
+  url: "http://novalux-adaptive-core.novalux-system.svc.cluster.local:8080"
+  connection-timeout: 5s
+  read-timeout: 30s
