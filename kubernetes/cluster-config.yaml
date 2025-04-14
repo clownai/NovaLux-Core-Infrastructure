@@ -1,0 +1,102 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: novalux-cluster-config
+  namespace: novalux-system
+data:
+  cluster-name: "novalux-adaptive-core"
+  environment: "development"
+  region: "us-west-2"
+  node-groups: "core-services,game-engines,ai-processing,data-pipeline"
+  auto-scaling: "enabled"
+  min-nodes: "3"
+  max-nodes: "12"
+  default-replicas: "3"
+  monitoring-enabled: "true"
+  logging-enabled: "true"
+  backup-enabled: "true"
+  backup-schedule: "0 2 * * *"
+  retention-days: "7"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: novalux-system
+  labels:
+    name: novalux-system
+    environment: development
+    component: core
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: novalux-data
+  labels:
+    name: novalux-data
+    environment: development
+    component: data-pipeline
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: novalux-games
+  labels:
+    name: novalux-games
+    environment: development
+    component: game-engines
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: novalux-ai
+  labels:
+    name: novalux-ai
+    environment: development
+    component: ai-processing
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: novalux-resource-quota
+  namespace: novalux-system
+spec:
+  hard:
+    pods: "50"
+    requests.cpu: "10"
+    requests.memory: 20Gi
+    limits.cpu: "20"
+    limits.memory: 40Gi
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: novalux-system
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-internal-traffic
+  namespace: novalux-system
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: novalux-system
+    - namespaceSelector:
+        matchLabels:
+          name: novalux-data
+    - namespaceSelector:
+        matchLabels:
+          name: novalux-games
+    - namespaceSelector:
+        matchLabels:
+          name: novalux-ai

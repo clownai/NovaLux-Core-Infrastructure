@@ -1,0 +1,178 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: novalux-core-integrator
+  namespace: novalux-system
+  labels:
+    app: novalux-core-integrator
+    component: core-engine
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: novalux-core-integrator
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: novalux-core-integrator
+        component: core-engine
+    spec:
+      containers:
+      - name: core-integrator
+        image: novalux/core-integrator:v1.0.0
+        imagePullPolicy: Always
+        resources:
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+          limits:
+            cpu: "2"
+            memory: "4Gi"
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 9090
+          name: metrics
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka-headless.novalux-data.svc.cluster.local:9092"
+        - name: ELASTICSEARCH_HOSTS
+          value: "elasticsearch-master.novalux-data.svc.cluster.local:9200"
+        - name: ADAPTIVE_CORE_URL
+          value: "http://novalux-adaptive-core.novalux-system.svc.cluster.local:8080"
+        - name: FEEDBACK_LOOP_MANAGER_URL
+          value: "http://novalux-feedback-loop-manager.novalux-system.svc.cluster.local:8080"
+        - name: DATA_INGESTION_URL
+          value: "http://novalux-data-ingestion.novalux-data.svc.cluster.local:8080"
+        - name: STREAM_PROCESSOR_URL
+          value: "http://novalux-stream-processor.novalux-data.svc.cluster.local:8080"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 5
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/novalux
+      volumes:
+      - name: config-volume
+        configMap:
+          name: novalux-core-integrator-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: novalux-core-integrator
+  namespace: novalux-system
+  labels:
+    app: novalux-core-integrator
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: http
+    name: http
+  - port: 9090
+    targetPort: metrics
+    name: metrics
+  selector:
+    app: novalux-core-integrator
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: novalux-core-integrator-config
+  namespace: novalux-system
+data:
+  core-integrator.yaml: |
+    server:
+      port: 8080
+      metrics-port: 9090
+      shutdown-timeout: 30s
+    
+    telemetry:
+      enabled: true
+      sampling-rate: 0.1
+      trace-export-interval: 5s
+    
+    integration:
+      health-check-interval: 15s
+      component-timeout: 5s
+      retry-attempts: 3
+      retry-delay: 1s
+      circuit-breaker:
+        failure-threshold: 5
+        reset-timeout: 30s
+      
+      components:
+        - name: "adaptive-core"
+          url: "http://novalux-adaptive-core.novalux-system.svc.cluster.local:8080"
+          required: true
+          health-endpoint: "/health"
+          
+        - name: "feedback-loop-manager"
+          url: "http://novalux-feedback-loop-manager.novalux-system.svc.cluster.local:8080"
+          required: true
+          health-endpoint: "/health"
+          
+        - name: "data-ingestion"
+          url: "http://novalux-data-ingestion.novalux-data.svc.cluster.local:8080"
+          required: true
+          health-endpoint: "/health"
+          
+        - name: "stream-processor"
+          url: "http://novalux-stream-processor.novalux-data.svc.cluster.local:8080"
+          required: true
+          health-endpoint: "/health"
+          
+        - name: "kafka"
+          url: "kafka-headless.novalux-data.svc.cluster.local:9092"
+          required: true
+          health-check-type: "tcp"
+          
+        - name: "elasticsearch"
+          url: "http://elasticsearch-master.novalux-data.svc.cluster.local:9200"
+          required: true
+          health-endpoint: "/_cluster/health"
+    
+    kafka:
+      bootstrap-servers: "kafka-headless.novalux-data.svc.cluster.local:9092"
+      consumer-group: "core-integrator"
+      topics:
+        input:
+          - "optimization-events"
+          - "parameter-adjustments"
+          - "model-update-requests"
+        output:
+          integration-events: "integration-events"
+          system-status: "system-status"
+    
+    elasticsearch:
+      hosts: "elasticsearch-master.novalux-data.svc.cluster.local:9200"
+      indices:
+        integration-status:
+          name: "integration-status"
+          retention-days: 30
+        system-health:
+          name: "system-health"
+          retention-days: 90
+    
+    monitoring:
+      metrics-interval: 15s
+      health-check-interval: 5s
+      alert-thresholds:
+        component-failure-count: 3
+        integration-latency-ms: 500
+        message-processing-errors: 0.01

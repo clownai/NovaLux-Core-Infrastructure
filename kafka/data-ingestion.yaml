@@ -1,0 +1,166 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: novalux-data-ingestion
+  namespace: novalux-data
+  labels:
+    app: novalux-data-ingestion
+    component: data-pipeline
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: novalux-data-ingestion
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: novalux-data-ingestion
+        component: data-pipeline
+    spec:
+      containers:
+      - name: data-ingestion
+        image: novalux/data-ingestion:v1.0.0
+        imagePullPolicy: Always
+        resources:
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+          limits:
+            cpu: "2"
+            memory: "4Gi"
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 9090
+          name: metrics
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka-headless.novalux-data.svc.cluster.local:9092"
+        - name: SCHEMA_REGISTRY_URL
+          value: "http://schema-registry.novalux-data.svc.cluster.local:8081"
+        - name: INGESTION_RATE_LIMIT
+          value: "10000"
+        - name: BATCH_SIZE
+          value: "1000"
+        - name: FLUSH_INTERVAL_MS
+          value: "500"
+        - name: COMPRESSION_TYPE
+          value: "lz4"
+        - name: TELEMETRY_ENABLED
+          value: "true"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 15
+          periodSeconds: 5
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/novalux
+      volumes:
+      - name: config-volume
+        configMap:
+          name: novalux-data-ingestion-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: novalux-data-ingestion
+  namespace: novalux-data
+  labels:
+    app: novalux-data-ingestion
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: http
+    name: http
+  - port: 9090
+    targetPort: metrics
+    name: metrics
+  selector:
+    app: novalux-data-ingestion
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: novalux-data-ingestion-config
+  namespace: novalux-data
+data:
+  data-ingestion.yaml: |
+    server:
+      port: 8080
+      metrics-port: 9090
+      shutdown-timeout: 30s
+    
+    telemetry:
+      enabled: true
+      sampling-rate: 0.1
+      trace-export-interval: 5s
+    
+    kafka:
+      producer:
+        acks: "all"
+        retries: 5
+        retry-backoff-ms: 100
+        batch-size: 16384
+        linger-ms: 5
+        buffer-memory: 33554432
+        compression-type: "lz4"
+        enable-idempotence: true
+      
+      topics:
+        player-actions:
+          name: "player-actions"
+          partitions: 12
+          replication-factor: 3
+          retention-ms: 86400000  # 24 hours
+          cleanup-policy: "delete"
+        
+        game-events:
+          name: "game-events"
+          partitions: 12
+          replication-factor: 3
+          retention-ms: 86400000  # 24 hours
+          cleanup-policy: "delete"
+        
+        system-metrics:
+          name: "system-metrics"
+          partitions: 6
+          replication-factor: 3
+          retention-ms: 43200000  # 12 hours
+          cleanup-policy: "delete"
+    
+    schema-registry:
+      url: "http://schema-registry.novalux-data.svc.cluster.local:8081"
+      cache-size: 1000
+      auto-register-schemas: true
+    
+    rate-limiting:
+      enabled: true
+      max-requests-per-second: 10000
+      burst: 1000
+    
+    validation:
+      enabled: true
+      reject-invalid-messages: true
+      log-invalid-messages: true
+    
+    monitoring:
+      metrics-interval: 15s
+      health-check-interval: 5s
+      alert-thresholds:
+        error-rate: 0.01
+        latency-p99-ms: 500
+        throughput-min: 1000

@@ -1,0 +1,185 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: novalux-stream-processor
+  namespace: novalux-data
+  labels:
+    app: novalux-stream-processor
+    component: data-pipeline
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: novalux-stream-processor
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: novalux-stream-processor
+        component: data-pipeline
+    spec:
+      containers:
+      - name: stream-processor
+        image: novalux/stream-processor:v1.0.0
+        imagePullPolicy: Always
+        resources:
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+          limits:
+            cpu: "2"
+            memory: "4Gi"
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 9090
+          name: metrics
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka-headless.novalux-data.svc.cluster.local:9092"
+        - name: SCHEMA_REGISTRY_URL
+          value: "http://schema-registry.novalux-data.svc.cluster.local:8081"
+        - name: APPLICATION_ID
+          value: "novalux-stream-processor"
+        - name: ELASTICSEARCH_HOSTS
+          value: "elasticsearch-master.novalux-data.svc.cluster.local:9200"
+        - name: PROCESSING_THREADS
+          value: "8"
+        - name: COMMIT_INTERVAL_MS
+          value: "1000"
+        - name: CACHE_MAX_BYTES_BUFFERING
+          value: "104857600" # 100MB
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 5
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/novalux
+      volumes:
+      - name: config-volume
+        configMap:
+          name: novalux-stream-processor-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: novalux-stream-processor
+  namespace: novalux-data
+  labels:
+    app: novalux-stream-processor
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: http
+    name: http
+  - port: 9090
+    targetPort: metrics
+    name: metrics
+  selector:
+    app: novalux-stream-processor
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: novalux-stream-processor-config
+  namespace: novalux-data
+data:
+  stream-processor.yaml: |
+    server:
+      port: 8080
+      metrics-port: 9090
+      shutdown-timeout: 30s
+    
+    telemetry:
+      enabled: true
+      sampling-rate: 0.1
+      trace-export-interval: 5s
+    
+    kafka-streams:
+      application-id: "novalux-stream-processor"
+      bootstrap-servers: "kafka-headless.novalux-data.svc.cluster.local:9092"
+      schema-registry-url: "http://schema-registry.novalux-data.svc.cluster.local:8081"
+      processing-guarantee: "exactly_once_v2"
+      num-stream-threads: 8
+      commit-interval-ms: 1000
+      cache-max-bytes-buffering: 104857600 # 100MB
+      replication-factor: 3
+      state-dir: "/tmp/kafka-streams"
+      
+      topics:
+        input:
+          - "player-actions"
+          - "game-events"
+          - "system-metrics"
+        output:
+          player-metrics: "player-metrics"
+          game-metrics: "game-metrics"
+          system-aggregates: "system-aggregates"
+          anomaly-events: "anomaly-events"
+    
+    processors:
+      player-behavior:
+        enabled: true
+        window-size-minutes: 10
+        sliding-interval-seconds: 30
+        metrics-output-topic: "player-metrics"
+        anomaly-threshold: 3.0
+      
+      game-performance:
+        enabled: true
+        window-size-minutes: 5
+        sliding-interval-seconds: 15
+        metrics-output-topic: "game-metrics"
+        performance-threshold-ms: 500
+      
+      system-health:
+        enabled: true
+        window-size-minutes: 2
+        sliding-interval-seconds: 10
+        metrics-output-topic: "system-aggregates"
+        health-threshold: 0.9
+    
+    elasticsearch:
+      hosts: "elasticsearch-master.novalux-data.svc.cluster.local:9200"
+      bulk-actions: 1000
+      bulk-size: 5MB
+      flush-interval: 5s
+      concurrency: 5
+      indices:
+        player-metrics:
+          name: "player-metrics"
+          shards: 5
+          replicas: 1
+          refresh-interval: "10s"
+        game-metrics:
+          name: "game-metrics"
+          shards: 5
+          replicas: 1
+          refresh-interval: "10s"
+        system-aggregates:
+          name: "system-aggregates"
+          shards: 3
+          replicas: 1
+          refresh-interval: "5s"
+    
+    monitoring:
+      metrics-interval: 15s
+      health-check-interval: 5s
+      alert-thresholds:
+        processing-lag-max: 5000
+        throughput-min: 1000
+        error-rate: 0.01

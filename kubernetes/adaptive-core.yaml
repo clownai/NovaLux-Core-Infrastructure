@@ -1,0 +1,153 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: novalux-adaptive-core
+  namespace: novalux-system
+  labels:
+    app: novalux-adaptive-core
+    component: core-engine
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: novalux-adaptive-core
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: novalux-adaptive-core
+        component: core-engine
+    spec:
+      containers:
+      - name: adaptive-core
+        image: novalux/adaptive-core:v1.0.0
+        imagePullPolicy: Always
+        resources:
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+          limits:
+            cpu: "2"
+            memory: "4Gi"
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 9090
+          name: metrics
+        env:
+        - name: ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: novalux-cluster-config
+              key: environment
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka-headless.novalux-data.svc.cluster.local:9092"
+        - name: ELASTICSEARCH_HOSTS
+          value: "elasticsearch-master.novalux-data.svc.cluster.local:9200"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 5
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/novalux
+        - name: data-volume
+          mountPath: /var/lib/novalux
+      volumes:
+      - name: config-volume
+        configMap:
+          name: novalux-adaptive-core-config
+      - name: data-volume
+        persistentVolumeClaim:
+          claimName: novalux-adaptive-core-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: novalux-adaptive-core
+  namespace: novalux-system
+  labels:
+    app: novalux-adaptive-core
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: http
+    name: http
+  - port: 9090
+    targetPort: metrics
+    name: metrics
+  selector:
+    app: novalux-adaptive-core
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: novalux-adaptive-core-config
+  namespace: novalux-system
+data:
+  adaptive-core.yaml: |
+    server:
+      port: 8080
+      metrics-port: 9090
+      shutdown-timeout: 30s
+    
+    telemetry:
+      enabled: true
+      sampling-rate: 0.1
+      trace-export-interval: 5s
+    
+    feedback-loop:
+      enabled: true
+      update-interval: 60s
+      optimization-threshold: 0.05
+      max-concurrent-optimizations: 5
+    
+    ai-integration:
+      model-server-url: "http://ai-model-server.novalux-ai.svc.cluster.local:8000"
+      inference-timeout: 500ms
+      batch-size: 32
+      cache-ttl: 300s
+    
+    data-pipeline:
+      kafka:
+        consumer-group: "adaptive-core"
+        topics:
+          - "player-actions"
+          - "game-events"
+          - "system-metrics"
+        auto-offset-reset: "latest"
+        max-poll-records: 500
+        poll-timeout: 5s
+      
+      elasticsearch:
+        index-prefix: "novalux-"
+        bulk-actions: 1000
+        bulk-size: 5MB
+        flush-interval: 5s
+        concurrency: 5
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: novalux-adaptive-core-data
+  namespace: novalux-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard

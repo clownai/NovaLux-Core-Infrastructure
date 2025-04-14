@@ -1,0 +1,278 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: novalux-data
+  labels:
+    app: kafka
+    component: data-pipeline
+spec:
+  serviceName: "kafka-headless"
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kafka
+  updateStrategy:
+    type: RollingUpdate
+  podManagementPolicy: Parallel
+  template:
+    metadata:
+      labels:
+        app: kafka
+        component: data-pipeline
+    spec:
+      terminationGracePeriodSeconds: 120
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - kafka
+              topologyKey: "kubernetes.io/hostname"
+      containers:
+      - name: kafka
+        image: confluentinc/cp-kafka:7.3.0
+        imagePullPolicy: IfNotPresent
+        resources:
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+          limits:
+            cpu: "2"
+            memory: "4Gi"
+        ports:
+        - containerPort: 9092
+          name: kafka
+        - containerPort: 9093
+          name: kafka-internal
+        env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: KAFKA_BROKER_ID
+          value: "${HOSTNAME##*-}"
+        - name: KAFKA_ZOOKEEPER_CONNECT
+          value: "zookeeper-headless.novalux-data.svc.cluster.local:2181"
+        - name: KAFKA_ADVERTISED_LISTENERS
+          value: "PLAINTEXT://$(POD_NAME).kafka-headless.novalux-data.svc.cluster.local:9092,INTERNAL://$(POD_IP):9093"
+        - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+          value: "PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT"
+        - name: KAFKA_INTER_BROKER_LISTENER_NAME
+          value: "INTERNAL"
+        - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+          value: "3"
+        - name: KAFKA_DEFAULT_REPLICATION_FACTOR
+          value: "3"
+        - name: KAFKA_MIN_INSYNC_REPLICAS
+          value: "2"
+        - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+          value: "false"
+        - name: KAFKA_LOG_RETENTION_HOURS
+          value: "24"
+        - name: KAFKA_LOG_SEGMENT_BYTES
+          value: "1073741824"
+        - name: KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS
+          value: "300000"
+        - name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
+          value: "3000"
+        - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+          value: "3"
+        - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+          value: "2"
+        livenessProbe:
+          tcpSocket:
+            port: kafka
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: kafka
+          initialDelaySeconds: 30
+          periodSeconds: 5
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/kafka/data
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: "standard"
+      resources:
+        requests:
+          storage: 50Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+  namespace: novalux-data
+  labels:
+    app: kafka
+    component: data-pipeline
+spec:
+  clusterIP: None
+  ports:
+  - port: 9092
+    name: kafka
+  selector:
+    app: kafka
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: novalux-data
+  labels:
+    app: kafka
+    component: data-pipeline
+spec:
+  type: ClusterIP
+  ports:
+  - port: 9092
+    targetPort: kafka
+    name: kafka
+  selector:
+    app: kafka
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: zookeeper
+  namespace: novalux-data
+  labels:
+    app: zookeeper
+    component: data-pipeline
+spec:
+  serviceName: "zookeeper-headless"
+  replicas: 3
+  selector:
+    matchLabels:
+      app: zookeeper
+  updateStrategy:
+    type: RollingUpdate
+  podManagementPolicy: Parallel
+  template:
+    metadata:
+      labels:
+        app: zookeeper
+        component: data-pipeline
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - zookeeper
+              topologyKey: "kubernetes.io/hostname"
+      containers:
+      - name: zookeeper
+        image: confluentinc/cp-zookeeper:7.3.0
+        imagePullPolicy: IfNotPresent
+        resources:
+          requests:
+            cpu: "0.5"
+            memory: "1Gi"
+          limits:
+            cpu: "1"
+            memory: "2Gi"
+        ports:
+        - containerPort: 2181
+          name: client
+        - containerPort: 2888
+          name: server
+        - containerPort: 3888
+          name: leader-election
+        env:
+        - name: ZOOKEEPER_SERVER_ID
+          value: "${HOSTNAME##*-}"
+        - name: ZOOKEEPER_CLIENT_PORT
+          value: "2181"
+        - name: ZOOKEEPER_TICK_TIME
+          value: "2000"
+        - name: ZOOKEEPER_INIT_LIMIT
+          value: "5"
+        - name: ZOOKEEPER_SYNC_LIMIT
+          value: "2"
+        - name: ZOOKEEPER_SERVERS
+          value: "zookeeper-0.zookeeper-headless.novalux-data.svc.cluster.local:2888:3888;zookeeper-1.zookeeper-headless.novalux-data.svc.cluster.local:2888:3888;zookeeper-2.zookeeper-headless.novalux-data.svc.cluster.local:2888:3888"
+        livenessProbe:
+          tcpSocket:
+            port: client
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: client
+          initialDelaySeconds: 15
+          periodSeconds: 5
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/zookeeper/data
+        - name: log
+          mountPath: /var/lib/zookeeper/log
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: "standard"
+      resources:
+        requests:
+          storage: 10Gi
+  - metadata:
+      name: log
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: "standard"
+      resources:
+        requests:
+          storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper-headless
+  namespace: novalux-data
+  labels:
+    app: zookeeper
+    component: data-pipeline
+spec:
+  clusterIP: None
+  ports:
+  - port: 2181
+    name: client
+  - port: 2888
+    name: server
+  - port: 3888
+    name: leader-election
+  selector:
+    app: zookeeper
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper
+  namespace: novalux-data
+  labels:
+    app: zookeeper
+    component: data-pipeline
+spec:
+  type: ClusterIP
+  ports:
+  - port: 2181
+    targetPort: client
+    name: client
+  selector:
+    app: zookeeper
